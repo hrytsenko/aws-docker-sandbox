@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: "2010-09-09"  
+Parameters:
+  dockerSandboxKey:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Key pair for Docker Sandbox
+Resources:  
+  dockerSandboxGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: docker-sandbox-grpup
+      GroupDescription: Security group for Docker Sandbox
+      SecurityGroupIngress:
+        # SSH
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        # Docker
+        - IpProtocol: tcp
+          FromPort: 10000
+          ToPort: 10000
+          CidrIp: 0.0.0.0/0
+        # Containers
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 9000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: docker-sandbox-group
+  dockerSandboxInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install:
+            - docker
+        docker:
+          files:
+            /root/docker-sandbox-install.sh:
+              content: !Sub |
+                #!/bin/sh
+                amazon-linux-extras install -y docker
+                mkdir -p /etc/systemd/system/docker.service.d
+                bash -c 'printf "[Service]\nExecStart=\nExecStart=/usr/bin/dockerd -H unix:// -H tcp://0.0.0.0:10000\n" >> /etc/systemd/system/docker.service.d/options.conf'
+                systemctl daemon-reload
+                service docker start
+          commands:
+            install:
+              command: 'sudo sh /root/docker-sandbox-install.sh'
+    Properties:
+      InstanceType: t3.medium
+      ImageId: ami-0742b4e673072066f
+      KeyName: !Ref dockerSandboxKey
+      SecurityGroupIds:
+        - !Ref dockerSandboxGroup
+      Tags:
+        - Key: Name
+          Value: docker-sandbox-instance
+      UserData: !Base64 
+        Fn::Join:
+          - ''
+          - - |
+              #!/bin/bash -xe
+            - |
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource dockerSandboxInstance '
+            - '         --configsets install '
+            - |+
